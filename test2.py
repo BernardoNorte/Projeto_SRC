@@ -60,7 +60,7 @@ class PacketCaptureApp(ctk.CTk):
         # Extract packet information
         protocol = "Unknown"
         src_ip = dst_ip = "N/A"
-        print(packet[2])
+        #print(packet[2])
 
         if IP in packet:
             src_ip = packet[IP].src
