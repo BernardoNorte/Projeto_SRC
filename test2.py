@@ -11,24 +11,24 @@ class PacketCaptureApp(ctk.CTk):
 
         # Create Table Headers
         self.table_headers = ["No.", "Source IP", "Destination IP", "Protocol"]
-        self.packet_table = ctk.CTkFrame(self, width=800)
+        self.packet_table = ctk.CTkScrollableFrame(self, width=800)
         self.packet_table.pack(pady=10, padx=10, fill="both", expand=True)
 
         self.create_table_headers()
         self.packet_data = []  # Store captured packets
 
-        # Start Packet Capture
-        self.sniff_packets()
+        # State for capturing packets
+        self.capturing = False
 
         # Buttons
         self.button_frame = ctk.CTkFrame(self)
         self.button_frame.pack(pady=10, padx=10)
         self.start_button = ctk.CTkButton(
-            self.button_frame, text="Start Capture", command=self.button_callback
+            self.button_frame, text="Start Capture", command=self.button_call_start, fg_color="Red"
         )
         self.start_button.pack(side="left", padx=5)
         self.stop_button = ctk.CTkButton(
-            self.button_frame, text="Stop Capture", command=self.button_callback
+            self.button_frame, text="Stop Capture", command=self.button_call_stop
         )
         self.stop_button.pack(side="left", padx=5)
 
@@ -60,7 +60,7 @@ class PacketCaptureApp(ctk.CTk):
         # Extract packet information
         protocol = "Unknown"
         src_ip = dst_ip = "N/A"
-        #print(packet[2])
+        # print(packet[2])
 
         if IP in packet:
             src_ip = packet[IP].src
@@ -82,14 +82,30 @@ class PacketCaptureApp(ctk.CTk):
     def sniff_packets(self):
         # Start packet capture in the background
         def capture():
-            sniff(prn=self.process_packet, count=8)
+            while self.capturing:  # Continue sniffing until stopped
+                sniff(prn=self.process_packet, count=1, store=False)
 
         import threading
         threading.Thread(target=capture, daemon=True).start()
 
+    # Test Button
     def button_callback(self):
         print("button clicked")
         print(self.packet_data)
+
+    # Start sniff
+    def button_call_start(self):
+        print("Start")
+        if not self.capturing:
+            self.capturing = True
+            self.sniff_packets()
+            self.start_button.configure(fg_color="Green")
+
+    # Stop sniff
+    def button_call_stop(self):
+        print("Stop")
+        self.capturing = False
+        self.start_button.configure(fg_color="Red")
 
 
 # Run the Application
