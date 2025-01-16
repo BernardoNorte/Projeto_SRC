@@ -26,7 +26,7 @@ class PacketCaptureApp(ctk.CTk):
     def show_frame(self, frame_name):
         frame = self.frames[frame_name]
         frame.pack(fill="both", expand=True)
-        # Esconde todos os outros frames
+
         for name, widget in self.frames.items():
             if name != frame_name:
                 widget.pack_forget()
@@ -37,16 +37,22 @@ class PacketCaptureApp(ctk.CTk):
         interfaces = list(psutil.net_if_addrs().keys())
 
         self.interface_var = ctk.StringVar(value=interfaces[0])
+
+        # Sub-frame para centralizar conteúdo
+        content_frame = ctk.CTkFrame(frame)
+        content_frame.pack(expand=True)  # Expande para centralizar no frame principal
+
         interface_menu = ctk.CTkOptionMenu(
-            frame, variable=self.interface_var, values=interfaces, command=self.interface_changed
+            content_frame, variable=self.interface_var, values=interfaces, command=self.interface_changed
         )
-        interface_menu.pack(pady=10)
+        interface_menu.pack(pady=20)
 
         start_button = ctk.CTkButton(
-            frame, text="Start Capture", command=self.start_capture
+            content_frame, text="Start Capture", command=self.start_capture
         )
-        start_button.pack(pady=10)
+        start_button.pack(pady=20)
 
+        frame.pack(fill="both", expand=True)  # Expande o frame principal para ocupar toda a janela
         return frame
 
     def create_packet_table_frame(self):
@@ -82,6 +88,7 @@ class PacketCaptureApp(ctk.CTk):
         frame = ctk.CTkFrame(self)
 
         self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
+
 
         self.protocol_fig, self.protocol_ax = plt.subplots(figsize=(6, 4))
         self.protocol_ax.set_title("Protocol Distribution")
@@ -120,6 +127,7 @@ class PacketCaptureApp(ctk.CTk):
                 font=("Arial", 10)
             )
             label.grid(row=row_idx + 1, column=col, sticky="w", padx=5, pady=5)
+            label.bind("<Double-Button-1>", lambda event, idx=row_idx: self.show_packet_details(idx))
 
     def start_capture(self):
         self.interface = self.interface_var.get()
@@ -130,6 +138,51 @@ class PacketCaptureApp(ctk.CTk):
 
         self.capturing = True
         self.sniff_packets()
+
+    def show_packet_details(self, packet_index):
+        packet_info = self.packet_data[packet_index]
+        packet = packet_info[-1]  # Obtém o pacote Scapy
+
+        details_window = ctk.CTkToplevel(self)
+        details_window.title("Packet Details")
+        details_window.geometry("600x400")
+
+        # Cabeçalhos do pacote
+        headers_frame = ctk.CTkFrame(details_window)
+        headers_frame.pack(pady=10, fill="both", expand=True)
+
+        headers_label = ctk.CTkLabel(headers_frame, text="Packet Headers:", font=("Arial", 12, "bold"))
+        headers_label.pack(anchor="w", padx=10, pady=5)
+
+        headers_text = ctk.CTkTextbox(headers_frame, width=560, height=150, font=("Courier", 10))
+        headers_text.pack(pady=5, padx=10, fill="both", expand=True)
+        headers_text.insert("1.0", packet.show(dump=True))  # Exibe os cabeçalhos
+
+        # Dados em formato hexadecimal
+        hex_frame = ctk.CTkFrame(details_window)
+        hex_frame.pack(pady=10, fill="both", expand=True)
+
+        hex_label = ctk.CTkLabel(hex_frame, text="Hexadecimal Data:", font=("Arial", 12, "bold"))
+        hex_label.pack(anchor="w", padx=10, pady=5)
+
+        hex_text = ctk.CTkTextbox(hex_frame, width=560, height=150, font=("Courier", 10))
+        hex_text.pack(pady=5, padx=10, fill="both", expand=True)
+
+        hex_view = self.format_hex(packet)
+        hex_text.insert("1.0", hex_view)
+
+        close_button = ctk.CTkButton(details_window, text="Close", command=details_window.destroy)
+        close_button.pack(pady=10)
+
+    def format_hex(self, packet):
+        raw_bytes = bytes(packet)
+        hex_lines = []
+        for i in range(0, len(raw_bytes), 16):
+            chunk = raw_bytes[i:i + 16]
+            hex_chunk = " ".join(f"{byte:02x}" for byte in chunk)
+            ascii_chunk = "".join(chr(byte) if 32 <= byte <= 126 else "." for byte in chunk)
+            hex_lines.append(f"{i:04x}  {hex_chunk:<48}  {ascii_chunk}")
+        return "\n".join(hex_lines)
 
     def process_packet(self, packet):
         protocol = "Unknown"
@@ -147,10 +200,10 @@ class PacketCaptureApp(ctk.CTk):
             else:
                 protocol = "IP"
 
-        packet_info = [len(self.packet_data) + 1, src_ip, dst_ip, protocol]
+        packet_info = [len(self.packet_data) + 1, src_ip, dst_ip, protocol, packet]
         self.packet_data.append(packet_info)
 
-        self.after(0, self.add_packet_to_table, packet_info)
+        self.after(0, self.add_packet_to_table, packet_info[:-1])
 
         self.protocol_count[protocol] += 1
         self.update_protocol_graph()
@@ -207,7 +260,6 @@ class PacketCaptureApp(ctk.CTk):
 
     def interface_changed(self, value):
         print(f"Interface changed to: {value}")
-
 
 if __name__ == "__main__":
     app = PacketCaptureApp()
