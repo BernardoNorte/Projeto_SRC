@@ -1,10 +1,11 @@
 import customtkinter as ctk
-from scapy.all import sniff, PcapWriter, IP, TCP, UDP, ICMP
+from scapy.all import sniff, PcapWriter, IP, TCP, UDP, ICMP, rdpcap
 import threading
 import time
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import psutil
+from tkinter import filedialog
 
 
 class PacketCaptureApp(ctk.CTk):
@@ -52,6 +53,11 @@ class PacketCaptureApp(ctk.CTk):
         )
         start_button.pack(pady=20)
 
+        import_button = ctk.CTkButton(
+            content_frame, text="Import Capture", command=self.import_capture
+        )
+        import_button.pack(pady=20)
+
         frame.pack(fill="both", expand=True)  # Expande o frame principal para ocupar toda a janela
         return frame
 
@@ -88,7 +94,6 @@ class PacketCaptureApp(ctk.CTk):
         frame = ctk.CTkFrame(self)
 
         self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
-
 
         self.protocol_fig, self.protocol_ax = plt.subplots(figsize=(6, 4))
         self.protocol_ax.set_title("Protocol Distribution")
@@ -260,6 +265,48 @@ class PacketCaptureApp(ctk.CTk):
 
     def interface_changed(self, value):
         print(f"Interface changed to: {value}")
+
+    def import_capture(self):
+        self.show_frame("packet_table")
+        self.import_packets()
+
+    def import_packets(self):
+        # Open a file dialog to select a PCAP file
+        file_path = filedialog.askopenfilename(
+            title="Select a PCAP file",
+            filetypes=(("PCAP files", "*.pcap"), ("All files", "*.*"))
+        )
+
+        if not file_path:
+            print("File Not Found")
+            return
+
+        try:
+            # Load packets from the PCAP file
+            packets = rdpcap(file_path)
+            self.clear_table()
+            self.packet_data = []  # Reset the packet data list
+            self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
+
+            # Process each packet
+            for packet in packets:
+                self.process_packet(packet)
+
+            def process():
+                for packet in packets:
+                    self.process_packet(packet)
+
+            threading.Thread(target=process, daemon=True).start()
+
+            print(f"Successfully imported {len(packets)} packets from {file_path}.")
+        except Exception as e:
+            print(f"Failed to import PCAP file: {e}")
+
+    def clear_table(self):
+        for widget in self.packet_table.winfo_children():
+            if isinstance(widget, ctk.CTkLabel) and widget.grid_info()['row'] != 0:
+                widget.destroy()
+
 
 if __name__ == "__main__":
     app = PacketCaptureApp()
