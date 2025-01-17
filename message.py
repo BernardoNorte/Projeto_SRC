@@ -288,10 +288,6 @@ class PacketCaptureApp(ctk.CTk):
             self.packet_data = []  # Reset the packet data list
             self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
 
-            # Process each packet
-            for packet in packets:
-                self.process_packet(packet)
-
             def process():
                 for packet in packets:
                     self.process_packet(packet)
