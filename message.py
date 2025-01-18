@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from scapy.all import sniff, PcapWriter, IP, TCP, UDP, ICMP, rdpcap
+from scapy.all import *
 import threading
 import time
 import matplotlib.pyplot as plt
@@ -190,35 +190,91 @@ class PacketCaptureApp(ctk.CTk):
         return "\n".join(hex_lines)
 
     def process_packet(self, packet):
-        protocol = "Unknown"
         src_ip = dst_ip = "N/A"
+        protocol = "Unknown"
 
+        # Define protocol mappings
+        ipv4_protocols = {
+            1: "ICMP",
+            2: "IGMP",
+            6: "TCP",
+            17: "UDP",
+            47: "GRE",
+            50: "ESP",
+            51: "AH",
+        }
+
+        ipv6_protocols = {
+            6: "TCP",
+            17: "UDP",
+            58: "ICMPv6",
+            47: "GRE",
+            50: "ESP",
+            51: "AH",
+        }
+
+        # Check for IPv4 packets
         if IP in packet:
             src_ip = packet[IP].src
             dst_ip = packet[IP].dst
-            if TCP in packet:
-                protocol = "TCP"
-            elif UDP in packet:
-                protocol = "UDP"
-            elif ICMP in packet:
-                protocol = "ICMP"
-            else:
-                protocol = "IP"
+            proto_number = packet[IP].proto
+            protocol = ipv4_protocols.get(proto_number, f"{proto_number}")
 
+        # Check for IPv6 packets
+        elif IPv6 in packet:
+            src_ip = packet[IPv6].src
+            dst_ip = packet[IPv6].dst
+            proto_number = packet[IPv6].nh
+            protocol = ipv6_protocols.get(proto_number, f"{proto_number}")
+
+        # Check for other protocols like Ethernet, ARP, etc.
+        elif Ether in packet:  # Ethernet II
+            src_ip = packet[Ether].src
+            dst_ip = packet[Ether].dst
+            protocol = "Ethernet"
+        elif ARP in packet:  # ARP
+            src_ip = packet[ARP].hwsrc
+            dst_ip = packet[ARP].hwdst
+            protocol = "ARP"
+        elif Dot11 in packet:  # IEEE 802.11
+            src_ip = packet[Dot11].addr2
+            dst_ip = packet[Dot11].addr1
+            protocol = "Wi-Fi"
+        elif Dot3 in packet:  # IEEE 802.3
+            src_ip = packet[Dot3].src
+            dst_ip = packet[Dot3].dst
+            protocol = "802.3"
+        elif STP in packet:  # STP
+            src_ip = packet[STP].src
+            dst_ip = packet[STP].dst
+            protocol = "STP"
+        elif LLDP in packet:  # LLDP
+            src_ip = packet[LLDP].src
+            dst_ip = packet[LLDP].dst
+            protocol = "LLDP"
+        # Default for unhandled packet types
+        else:
+            src_ip = dst_ip = "N/A"
+            protocol = "Unknown"
+
+        # Create and store packet information
         packet_info = [len(self.packet_data) + 1, src_ip, dst_ip, protocol, packet]
         self.packet_data.append(packet_info)
 
-        self.after(0, self.add_packet_to_table, packet_info[:-1])
+        # Add the packet to the table and update UI
+        self.after(0, self.add_packet_to_table, packet_info[:-1])  # Exclude raw packet for table display
 
-        self.protocol_count[protocol] += 1
-        self.update_protocol_graph()
+        allowed_protocols = {"TCP", "UDP", "ICMP", "IP", "Unknown"}
+
+        if protocol in allowed_protocols:
+            self.protocol_count[protocol] += 1
+            self.update_protocol_graph()
 
     def sniff_packets(self):
         def capture():
             self.writer = PcapWriter("captured_packets.pcap", append=True, sync=True)
             while self.capturing:
                 sniff(iface=self.interface, prn=self.process_packet, count=1, store=False)
-                time.sleep(0.5)
             self.writer.close()
 
         threading.Thread(target=capture, daemon=True).start()
