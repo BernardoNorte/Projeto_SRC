@@ -7,6 +7,11 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import psutil
 from tkinter import filedialog
 
+from scapy.layers.dot11 import Dot11
+from scapy.layers.inet6 import IPv6
+from scapy.layers.l2 import STP, Dot3, ARP, Ether
+from scapy.utils import rdpcap
+
 
 class PacketCaptureApp(ctk.CTk):
     def __init__(self):
@@ -15,14 +20,17 @@ class PacketCaptureApp(ctk.CTk):
         self.geometry("1920x1080")
 
         self.frames = {}
+        self.filter_text = ""
+        self.packet_data = []  # Lista completa de pacotes capturados
 
         self.frames["interface_selection"] = self.create_interface_selection_frame()
-
         self.frames["packet_table"] = self.create_packet_table_frame()
-
         self.frames["protocol_graph"] = self.create_protocol_graph_frame()
 
         self.show_frame("interface_selection")
+
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
 
     def show_frame(self, frame_name):
         frame = self.frames[frame_name]
@@ -35,13 +43,14 @@ class PacketCaptureApp(ctk.CTk):
     def create_interface_selection_frame(self):
         frame = ctk.CTkFrame(self)
 
-        interfaces = list(psutil.net_if_addrs().keys())
+        appTitle = ctk.CTkLabel(self, text="Packet Capture App")
+        appTitle.pack(padx=20, pady=20)
 
+        interfaces = list(psutil.net_if_addrs().keys())
         self.interface_var = ctk.StringVar(value=interfaces[0])
 
-        # Sub-frame para centralizar conteúdo
         content_frame = ctk.CTkFrame(frame)
-        content_frame.pack(expand=True)  # Expande para centralizar no frame principal
+        content_frame.pack(expand=True)
 
         interface_menu = ctk.CTkOptionMenu(
             content_frame, variable=self.interface_var, values=interfaces, command=self.interface_changed
@@ -58,7 +67,7 @@ class PacketCaptureApp(ctk.CTk):
         )
         import_button.pack(pady=20)
 
-        frame.pack(fill="both", expand=True)  # Expande o frame principal para ocupar toda a janela
+        frame.pack(fill="both", expand=True)
         return frame
 
     def create_packet_table_frame(self):
@@ -69,6 +78,23 @@ class PacketCaptureApp(ctk.CTk):
         self.packet_table.pack(pady=10, padx=10, fill="both", expand=True)
 
         self.create_table_headers()
+        self.rownum = 0;
+
+        self.filter_frame = ctk.CTkFrame(frame)
+        self.filter_frame.pack(pady=10, padx=10)
+
+        self.filter_entry = ctk.CTkEntry(self.filter_frame, placeholder_text="Enter filter (e.g., TCP, 192.168.0.1)")
+        self.filter_entry.pack(side="left", padx=5)
+
+        self.filter_button = ctk.CTkButton(
+            self.filter_frame, text="Apply Filter", command=self.apply_filter
+        )
+        self.filter_button.pack(side="left", padx=5)
+
+        self.clear_filter_button = ctk.CTkButton(
+            self.filter_frame, text="Clear Filter", command=self.clear_filter
+        )
+        self.clear_filter_button.pack(side="left", padx=5)
 
         self.button_frame = ctk.CTkFrame(frame)
         self.button_frame.pack(pady=10, padx=10)
@@ -94,7 +120,6 @@ class PacketCaptureApp(ctk.CTk):
         frame = ctk.CTkFrame(self)
 
         self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
-
         self.protocol_fig, self.protocol_ax = plt.subplots(figsize=(6, 4))
         self.protocol_ax.set_title("Protocol Distribution")
 
@@ -120,11 +145,10 @@ class PacketCaptureApp(ctk.CTk):
                 font=("Arial", 12, "bold")
             )
             label.grid(row=0, column=col, sticky="w", padx=5, pady=5)
-            label.bind("<Button-1>", lambda event, col=col: self.sort_table(col))
 
-    def add_packet_to_table(self, packet_info):
-        row_idx = len(self.packet_data)  # Ensure proper row index
-        for col, data in enumerate(packet_info):
+    def add_packet_to_table(self, packet_data):
+        row_idx = self.rownum
+        for col, data in enumerate(packet_data):
             label = ctk.CTkLabel(
                 self.packet_table,
                 text=data,
@@ -134,25 +158,48 @@ class PacketCaptureApp(ctk.CTk):
             label.grid(row=row_idx + 1, column=col, sticky="w", padx=5, pady=5)
             label.bind("<Double-Button-1>", lambda event, idx=row_idx: self.show_packet_details(idx))
 
-    def start_capture(self):
-        self.interface = self.interface_var.get()
-        self.packet_data = []
-        self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
+    def apply_filter(self):
+        self.filter_text = self.filter_entry.get().strip().lower()
+        self.update_table()
 
-        self.show_frame("packet_table")
+    def clear_filter(self):
+        self.filter_text = ""
+        self.filter_entry.delete(0, "end")
+        self.update_table()
+        print(self.packet_data)
 
-        self.capturing = True
-        self.sniff_packets()
+    def update_table(self):
+        self.clear_table()
+
+        if self.filter_text == "":
+            for packet_data in self.packet_data:
+                self.rownum+=1
+                self.add_packet_to_table(packet_data[:-1])
+        else:
+            for packet_data in self.packet_data:
+                if self.filter_matches(packet_data):
+                    self.rownum += 1
+                    self.add_packet_to_table(packet_data[:-1])
+
+    def filter_matches(self, packet_info):
+        source_ip = packet_info[1].lower()
+        destination_ip = packet_info[2].lower()
+        protocol = packet_info[3].lower()
+
+        return (
+                self.filter_text in source_ip
+                or self.filter_text in destination_ip
+                or self.filter_text in protocol
+        )
 
     def show_packet_details(self, packet_index):
         packet_info = self.packet_data[packet_index]
-        packet = packet_info[-1]  # Obtém o pacote Scapy
+        packet = packet_info[-1]
 
         details_window = ctk.CTkToplevel(self)
         details_window.title("Packet Details")
         details_window.geometry("600x400")
 
-        # Cabeçalhos do pacote
         headers_frame = ctk.CTkFrame(details_window)
         headers_frame.pack(pady=10, fill="both", expand=True)
 
@@ -161,9 +208,8 @@ class PacketCaptureApp(ctk.CTk):
 
         headers_text = ctk.CTkTextbox(headers_frame, width=560, height=150, font=("Courier", 10))
         headers_text.pack(pady=5, padx=10, fill="both", expand=True)
-        headers_text.insert("1.0", packet.show(dump=True))  # Exibe os cabeçalhos
+        headers_text.insert("1.0", packet.show(dump=True))
 
-        # Dados em formato hexadecimal
         hex_frame = ctk.CTkFrame(details_window)
         hex_frame.pack(pady=10, fill="both", expand=True)
 
@@ -190,10 +236,9 @@ class PacketCaptureApp(ctk.CTk):
         return "\n".join(hex_lines)
 
     def process_packet(self, packet):
-        src_ip = dst_ip = "N/A"
         protocol = "Unknown"
+        src_ip = dst_ip = "N/A"
 
-        # Define protocol mappings
         ipv4_protocols = {
             1: "ICMP",
             2: "IGMP",
@@ -213,21 +258,20 @@ class PacketCaptureApp(ctk.CTk):
             51: "AH",
         }
 
-        # Check for IPv4 packets
+        # Processamento do pacote para obter os dados de IP e protocolo
         if IP in packet:
             src_ip = packet[IP].src
             dst_ip = packet[IP].dst
             proto_number = packet[IP].proto
             protocol = ipv4_protocols.get(proto_number, f"{proto_number}")
 
-        # Check for IPv6 packets
         elif IPv6 in packet:
             src_ip = packet[IPv6].src
             dst_ip = packet[IPv6].dst
             proto_number = packet[IPv6].nh
             protocol = ipv6_protocols.get(proto_number, f"{proto_number}")
 
-        # Check for other protocols like Ethernet, ARP, etc.
+        # Processamento de pacotes para diferentes tipos
         elif Ether in packet:  # Ethernet II
             src_ip = packet[Ether].src
             dst_ip = packet[Ether].dst
@@ -252,29 +296,35 @@ class PacketCaptureApp(ctk.CTk):
             src_ip = packet[LLDP].src
             dst_ip = packet[LLDP].dst
             protocol = "LLDP"
-        # Default for unhandled packet types
         else:
             src_ip = dst_ip = "N/A"
             protocol = "Unknown"
+        self.rownum += 1
+        packet_info = [self.rownum, src_ip, dst_ip, protocol, packet]
 
-        # Create and store packet information
-        packet_info = [len(self.packet_data) + 1, src_ip, dst_ip, protocol, packet]
         self.packet_data.append(packet_info)
 
-        # Add the packet to the table and update UI
-        self.after(0, self.add_packet_to_table, packet_info[:-1])  # Exclude raw packet for table display
+        if self.filter_text == "" or self.filter_matches(packet_info):
+            self.after(0, self.add_packet_to_table, packet_info[:-1])
 
-        allowed_protocols = {"TCP", "UDP", "ICMP", "IP", "Unknown"}
-
-        if protocol in allowed_protocols:
+        if protocol in ipv4_protocols or protocol in ipv6_protocols:
             self.protocol_count[protocol] += 1
             self.update_protocol_graph()
+
+    def start_capture(self):
+        self.interface = self.interface_var.get()
+        self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
+
+        self.show_frame("packet_table")
+        self.capturing = True
+        self.sniff_packets()
 
     def sniff_packets(self):
         def capture():
             self.writer = PcapWriter("captured_packets.pcap", append=True, sync=True)
             while self.capturing:
                 sniff(iface=self.interface, prn=self.process_packet, count=1, store=False)
+                time.sleep(0.5)
             self.writer.close()
 
         threading.Thread(target=capture, daemon=True).start()
@@ -305,18 +355,17 @@ class PacketCaptureApp(ctk.CTk):
 
     def clear_table(self):
         for widget in self.packet_table.winfo_children():
-            if isinstance(widget, ctk.CTkLabel) and widget.grid_info()['row'] != '0':
-                widget.destroy()
+            widget.destroy()
+        self.rownum = 0;
+        self.create_table_headers()
 
     def update_protocol_graph(self):
         self.protocol_ax.clear()
-
         labels = list(self.protocol_count.keys())
         sizes = list(self.protocol_count.values())
 
         self.protocol_ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
         self.protocol_ax.axis('equal')
-
         self.canvas.draw()
 
     def interface_changed(self, value):
@@ -327,7 +376,6 @@ class PacketCaptureApp(ctk.CTk):
         self.import_packets()
 
     def import_packets(self):
-        # Open a file dialog to select a PCAP file
         file_path = filedialog.askopenfilename(
             title="Select a PCAP file",
             filetypes=(("PCAP files", "*.pcap"), ("All files", "*.*"))
@@ -341,7 +389,6 @@ class PacketCaptureApp(ctk.CTk):
             # Load packets from the PCAP file
             packets = rdpcap(file_path)
             self.clear_table()
-            self.packet_data = []  # Reset the packet data list
             self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
 
             def process():
@@ -353,11 +400,6 @@ class PacketCaptureApp(ctk.CTk):
             print(f"Successfully imported {len(packets)} packets from {file_path}.")
         except Exception as e:
             print(f"Failed to import PCAP file: {e}")
-
-    def clear_table(self):
-        for widget in self.packet_table.winfo_children():
-            if isinstance(widget, ctk.CTkLabel) and widget.grid_info()['row'] != 0:
-                widget.destroy()
 
 
 if __name__ == "__main__":
