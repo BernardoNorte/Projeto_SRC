@@ -7,9 +7,12 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import psutil
 from tkinter import filedialog
 
+from scapy.layers.inet import IP
 from scapy.layers.dot11 import Dot11
 from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import STP, Dot3, ARP, Ether
+from scapy.contrib.lldp import LLDPDU
+
 from scapy.utils import rdpcap
 
 
@@ -78,7 +81,7 @@ class PacketCaptureApp(ctk.CTk):
         self.packet_table.pack(pady=10, padx=10, fill="both", expand=True)
 
         self.create_table_headers()
-        self.rownum = 0;
+        self.rownum = 0
 
         self.filter_frame = ctk.CTkFrame(frame)
         self.filter_frame.pack(pady=10, padx=10)
@@ -166,14 +169,13 @@ class PacketCaptureApp(ctk.CTk):
         self.filter_text = ""
         self.filter_entry.delete(0, "end")
         self.update_table()
-        print(self.packet_data)
 
     def update_table(self):
         self.clear_table()
 
         if self.filter_text == "":
             for packet_data in self.packet_data:
-                self.rownum+=1
+                self.rownum += 1
                 self.add_packet_to_table(packet_data[:-1])
         else:
             for packet_data in self.packet_data:
@@ -241,21 +243,21 @@ class PacketCaptureApp(ctk.CTk):
 
         ipv4_protocols = {
             1: "ICMP",
-            2: "IGMP",
+            # 2: "IGMP",
             6: "TCP",
             17: "UDP",
-            47: "GRE",
-            50: "ESP",
-            51: "AH",
+            # 47: "GRE",
+            # 50: "ESP",
+            # 351: "AH",
         }
 
         ipv6_protocols = {
             6: "TCP",
             17: "UDP",
-            58: "ICMPv6",
-            47: "GRE",
-            50: "ESP",
-            51: "AH",
+            # 58: "ICMPv6",
+            # 47: "GRE",
+            # 50: "ESP",
+            # 51: "AH",
         }
 
         # Processamento do pacote para obter os dados de IP e protocolo
@@ -292,10 +294,10 @@ class PacketCaptureApp(ctk.CTk):
             src_ip = packet[STP].src
             dst_ip = packet[STP].dst
             protocol = "STP"
-        elif LLDP in packet:  # LLDP
-            src_ip = packet[LLDP].src
-            dst_ip = packet[LLDP].dst
-            protocol = "LLDP"
+        elif LLDPDU in packet:  # LLDPDU
+            src_ip = packet[LLDPDU].src
+            dst_ip = packet[LLDPDU].dst
+            protocol = "LLDPDU"
         else:
             src_ip = dst_ip = "N/A"
             protocol = "Unknown"
@@ -307,7 +309,7 @@ class PacketCaptureApp(ctk.CTk):
         if self.filter_text == "" or self.filter_matches(packet_info):
             self.after(0, self.add_packet_to_table, packet_info[:-1])
 
-        if protocol in ipv4_protocols or protocol in ipv6_protocols:
+        if protocol in ipv4_protocols.values() or protocol in ipv6_protocols.values():
             self.protocol_count[protocol] += 1
             self.update_protocol_graph()
 
@@ -356,7 +358,7 @@ class PacketCaptureApp(ctk.CTk):
     def clear_table(self):
         for widget in self.packet_table.winfo_children():
             widget.destroy()
-        self.rownum = 0;
+        self.rownum = 0
         self.create_table_headers()
 
     def update_protocol_graph(self):
