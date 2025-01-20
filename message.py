@@ -30,6 +30,8 @@ class PacketCaptureApp(ctk.CTk):
         self.frames["packet_table"] = self.create_packet_table_frame()
         self.frames["protocol_graph"] = self.create_protocol_graph_frame()
 
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
         self.show_frame("interface_selection")
 
         ctk.set_appearance_mode("dark")
@@ -402,6 +404,17 @@ class PacketCaptureApp(ctk.CTk):
             print(f"Successfully imported {len(packets)} packets from {file_path}.")
         except Exception as e:
             print(f"Failed to import PCAP file: {e}")
+
+    def on_closing(self):
+        self.destroy_protocol_graph_frame()
+        self.destroy()
+
+    def destroy_protocol_graph_frame(self):
+        if hasattr(self, "protocol_fig"):
+            plt.close(self.protocol_fig)  # Close the matplotlib figure
+        if hasattr(self, "canvas"):
+            self.canvas.get_tk_widget().destroy()  # Destroy the canvas widget
+            self.canvas = None
 
 
 if __name__ == "__main__":
