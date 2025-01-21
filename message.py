@@ -91,6 +91,14 @@ class PacketCaptureApp(ctk.CTk):
         self.create_table_headers()
         self.rownum = 0
 
+        button_frame = ctk.CTkFrame(frame)
+        button_frame.pack(pady=10)
+
+        self.back_button = ctk.CTkButton(
+            button_frame, text="Back", command=self.return_to_interface_selection
+        )
+        self.back_button.pack(side="left", padx=5)
+
         self.filter_frame = ctk.CTkFrame(frame)
         self.filter_frame.pack(pady=10, padx=10)
 
@@ -456,6 +464,17 @@ class PacketCaptureApp(ctk.CTk):
             if self.capturing:
                 self.stop_capture()
         self.destroy()
+
+    def return_to_interface_selection(self):
+        self.stop_capture()
+        self.packet_data.clear()
+        self.rownum = 0
+
+        for widget in self.packet_table.winfo_children():
+            widget.destroy()
+        self.create_table_headers()
+
+        self.show_frame("interface_selection")
 
 
 if __name__ == "__main__":
