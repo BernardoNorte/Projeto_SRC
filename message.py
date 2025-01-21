@@ -7,7 +7,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import psutil
 from tkinter import filedialog
 
-from scapy.layers.inet import IP
+from scapy.layers.dns import DNS
+from scapy.layers.inet import IP, TCP, ICMP, UDP
 from scapy.layers.dot11 import Dot11
 from scapy.layers.inet6 import IPv6
 from scapy.layers.l2 import STP, Dot3, ARP, Ether
@@ -24,13 +25,11 @@ class PacketCaptureApp(ctk.CTk):
 
         self.frames = {}
         self.filter_text = ""
-        self.packet_data = []  # Lista completa de pacotes capturados
+        self.packet_data = []
 
         self.frames["interface_selection"] = self.create_interface_selection_frame()
         self.frames["packet_table"] = self.create_packet_table_frame()
         self.frames["protocol_graph"] = self.create_protocol_graph_frame()
-
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.show_frame("interface_selection")
 
@@ -78,7 +77,7 @@ class PacketCaptureApp(ctk.CTk):
     def create_packet_table_frame(self):
         frame = ctk.CTkFrame(self)
 
-        self.table_headers = ["No.", "Source IP", "Destination IP", "Protocol"]
+        self.table_headers = ["No.", "Source IP", "Destination IP", "Protocol", "Length", "Info"]
         self.packet_table = ctk.CTkScrollableFrame(frame, width=800)
         self.packet_table.pack(pady=10, padx=10, fill="both", expand=True)
 
@@ -242,76 +241,88 @@ class PacketCaptureApp(ctk.CTk):
     def process_packet(self, packet):
         protocol = "Unknown"
         src_ip = dst_ip = "N/A"
+        info = "N/A"
+        length = len(packet)
 
         ipv4_protocols = {
             1: "ICMP",
-            # 2: "IGMP",
             6: "TCP",
             17: "UDP",
-            # 47: "GRE",
-            # 50: "ESP",
-            # 351: "AH",
         }
 
         ipv6_protocols = {
             6: "TCP",
             17: "UDP",
-            # 58: "ICMPv6",
-            # 47: "GRE",
-            # 50: "ESP",
-            # 51: "AH",
         }
 
-        # Processamento do pacote para obter os dados de IP e protocolo
         if IP in packet:
             src_ip = packet[IP].src
             dst_ip = packet[IP].dst
             proto_number = packet[IP].proto
-            protocol = ipv4_protocols.get(proto_number, f"{proto_number}")
+            protocol = ipv4_protocols.get(proto_number, f"IPv4-{proto_number}")
 
         elif IPv6 in packet:
             src_ip = packet[IPv6].src
             dst_ip = packet[IPv6].dst
             proto_number = packet[IPv6].nh
-            protocol = ipv6_protocols.get(proto_number, f"{proto_number}")
+            protocol = ipv6_protocols.get(proto_number, f"IPv6-{proto_number}")
 
-        # Processamento de pacotes para diferentes tipos
-        elif Ether in packet:  # Ethernet II
-            src_ip = packet[Ether].src
-            dst_ip = packet[Ether].dst
-            protocol = "Ethernet"
-        elif ARP in packet:  # ARP
+        elif ARP in packet:
             src_ip = packet[ARP].hwsrc
             dst_ip = packet[ARP].hwdst
             protocol = "ARP"
-        elif Dot11 in packet:  # IEEE 802.11
-            src_ip = packet[Dot11].addr2
-            dst_ip = packet[Dot11].addr1
-            protocol = "Wi-Fi"
-        elif Dot3 in packet:  # IEEE 802.3
-            src_ip = packet[Dot3].src
-            dst_ip = packet[Dot3].dst
-            protocol = "802.3"
-        elif STP in packet:  # STP
-            src_ip = packet[STP].src
-            dst_ip = packet[STP].dst
+
+        elif Ether in packet:
+            src_ip = packet[Ether].src
+            dst_ip = packet[Ether].dst
+            protocol = "Ethernet"
+
+        if TCP in packet and packet[TCP].payload:
+            payload = bytes(packet[TCP].payload)
+
+            if payload.startswith(b"GET") or payload.startswith(b"POST") or b"HTTP" in payload:
+                protocol = "HTTP"
+                info = "HTTP Request/Response"
+
+            elif payload.startswith(b"\x16"):
+                protocol = "TLS"
+                info = "TLS Handshake"
+            else:
+                info = "Application Data"
+
+        elif UDP in packet and packet[UDP].payload:
+
+            if DNS in packet:
+                protocol = "DNS"
+                if packet[DNS].qr == 0:
+                    info = "DNS Query"
+                else:
+                    info = "DNS Response"
+            else:
+                info = "UDP Payload"
+
+        elif ICMP in packet:
+            protocol = "ICMP"
+            info = f"Type {packet[ICMP].type}, Code {packet[ICMP].code}"
+
+        elif STP in packet:
             protocol = "STP"
-        elif LLDPDU in packet:  # LLDPDU
-            src_ip = packet[LLDPDU].src
-            dst_ip = packet[LLDPDU].dst
-            protocol = "LLDPDU"
-        else:
-            src_ip = dst_ip = "N/A"
-            protocol = "Unknown"
+            info = "Spanning Tree Protocol"
+
+        elif LLDPDU in packet:
+            protocol = "LLDP"
+            info = "Link Layer Discovery Protocol"
+
         self.rownum += 1
-        packet_info = [self.rownum, src_ip, dst_ip, protocol, packet]
+        packet_info = [self.rownum, src_ip, dst_ip, protocol, length, info, packet]
 
         self.packet_data.append(packet_info)
 
         if self.filter_text == "" or self.filter_matches(packet_info):
             self.after(0, self.add_packet_to_table, packet_info[:-1])
 
-        if protocol in ipv4_protocols.values() or protocol in ipv6_protocols.values():
+        if protocol in ipv4_protocols.values() or protocol in ipv6_protocols.values() or protocol in ["HTTP", "TLS",
+                                                                                                      "DNS"]:
             self.protocol_count[protocol] += 1
             self.update_protocol_graph()
 
@@ -334,8 +345,23 @@ class PacketCaptureApp(ctk.CTk):
         threading.Thread(target=capture, daemon=True).start()
 
     def export_to_pcap(self):
-        print("Exporting packets to PCAP file...")
-        print("Pacotes exportados para captured_packets.pcap")
+        file_path = filedialog.asksaveasfilename(
+            title="Save as PCAP",
+            defaultextension=".pcap",
+            filetypes=(("PCAP files", "*.pcap"), ("All files", "*.*"))
+        )
+
+        if not file_path:
+            print("Export canceled by user.")
+            return
+
+        try:
+
+            packets = [packet_info[-1] for packet_info in self.packet_data]
+            wrpcap(file_path, packets)
+            print(f"Successfully exported {len(packets)} packets to {file_path}.")
+        except Exception as e:
+            print(f"Failed to export packets: {e}")
 
     def stop_capture(self):
         self.capturing = False
@@ -390,7 +416,7 @@ class PacketCaptureApp(ctk.CTk):
             return
 
         try:
-            # Load packets from the PCAP file
+
             packets = rdpcap(file_path)
             self.clear_table()
             self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
@@ -404,17 +430,6 @@ class PacketCaptureApp(ctk.CTk):
             print(f"Successfully imported {len(packets)} packets from {file_path}.")
         except Exception as e:
             print(f"Failed to import PCAP file: {e}")
-
-    def on_closing(self):
-        self.destroy_protocol_graph_frame()
-        self.destroy()
-
-    def destroy_protocol_graph_frame(self):
-        if hasattr(self, "protocol_fig"):
-            plt.close(self.protocol_fig)  # Close the matplotlib figure
-        if hasattr(self, "canvas"):
-            self.canvas.get_tk_widget().destroy()  # Destroy the canvas widget
-            self.canvas = None
 
 
 if __name__ == "__main__":
