@@ -27,14 +27,21 @@ class PacketCaptureApp(ctk.CTk):
         self.filter_text = ""
         self.packet_data = []
 
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
         self.frames["interface_selection"] = self.create_interface_selection_frame()
-        self.frames["packet_table"] = self.create_packet_table_frame()
-        self.frames["protocol_graph"] = self.create_protocol_graph_frame()
 
         self.show_frame("interface_selection")
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
+
+    def create_pos_selection(self):
+        #criar apenas a primera vez
+        if "packet_table" not in self.frames or not self.frames["packet_table"]:
+            self.frames["packet_table"] = self.create_packet_table_frame()
+            self.frames["protocol_graph"] = self.create_protocol_graph_frame()
+
 
     def show_frame(self, frame_name):
         frame = self.frames[frame_name]
@@ -123,7 +130,7 @@ class PacketCaptureApp(ctk.CTk):
     def create_protocol_graph_frame(self):
         frame = ctk.CTkFrame(self)
 
-        self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
+        self.protocol_count = {}
         self.protocol_fig, self.protocol_ax = plt.subplots(figsize=(6, 4))
         self.protocol_ax.set_title("Protocol Distribution")
 
@@ -136,6 +143,8 @@ class PacketCaptureApp(ctk.CTk):
             frame, text="Back", command=lambda: self.show_frame("packet_table")
         )
         back_button.pack(pady=10)
+
+        frame.bind("<Destroy>", lambda event: plt.close(self.protocol_fig))
 
         return frame
 
@@ -321,14 +330,13 @@ class PacketCaptureApp(ctk.CTk):
         if self.filter_text == "" or self.filter_matches(packet_info):
             self.after(0, self.add_packet_to_table, packet_info[:-1])
 
-        if protocol in ipv4_protocols.values() or protocol in ipv6_protocols.values() or protocol in ["HTTP", "TLS",
-                                                                                                      "DNS"]:
-            self.protocol_count[protocol] += 1
-            self.update_protocol_graph()
+        self.update_protocol_data(protocol)
 
     def start_capture(self):
+        self.create_pos_selection()
         self.interface = self.interface_var.get()
-        self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
+        self.protocol_count = {}
+        self.update_protocol_graph()
 
         self.show_frame("packet_table")
         self.capturing = True
@@ -365,6 +373,7 @@ class PacketCaptureApp(ctk.CTk):
 
     def stop_capture(self):
         self.capturing = False
+        plt.close(self.protocol_fig)
 
     def sort_table(self, col):
         col_name = self.table_headers[col]
@@ -398,10 +407,19 @@ class PacketCaptureApp(ctk.CTk):
         self.protocol_ax.axis('equal')
         self.canvas.draw()
 
+    def update_protocol_data(self, protocol):
+        if protocol in self.protocol_count:
+            self.protocol_count[protocol] += 1
+        else:
+            self.protocol_count[protocol] = 1
+        self.update_protocol_graph()
+
     def interface_changed(self, value):
         print(f"Interface changed to: {value}")
 
     def import_capture(self):
+        self.create_pos_selection()
+        self.capturing = False
         self.show_frame("packet_table")
         self.import_packets()
 
@@ -419,7 +437,8 @@ class PacketCaptureApp(ctk.CTk):
 
             packets = rdpcap(file_path)
             self.clear_table()
-            self.protocol_count = {"TCP": 0, "UDP": 0, "ICMP": 0, "IP": 0, "Unknown": 0}
+            self.protocol_count = {}
+            self.update_protocol_graph()
 
             def process():
                 for packet in packets:
@@ -430,6 +449,13 @@ class PacketCaptureApp(ctk.CTk):
             print(f"Successfully imported {len(packets)} packets from {file_path}.")
         except Exception as e:
             print(f"Failed to import PCAP file: {e}")
+        plt.close(self.protocol_fig)
+
+    def on_close(self):
+        if "packet_table" in self.frames:
+            if self.capturing:
+                self.stop_capture()
+        self.destroy()
 
 
 if __name__ == "__main__":
