@@ -353,7 +353,7 @@ class PacketCaptureApp(ctk.CTk):
         self.dst_ip_count[dst_ip] = self.dst_ip_count.get(dst_ip, 0) + 1
 
         self.rownum += 1
-        packet_info = [self.rownum, src_ip, dst_ip, protocol, length, info, packet]
+        packet_info = [len(self.packet_data) + 1, src_ip, dst_ip, protocol, length, info, packet]
         self.packet_data.append(packet_info)
 
         if self.filter_text == "" or self.filter_matches(packet_info):
@@ -374,11 +374,8 @@ class PacketCaptureApp(ctk.CTk):
 
     def sniff_packets(self):
         def capture():
-            self.writer = PcapWriter("captured_packets.pcap", append=True, sync=True)
             while self.capturing:
                 sniff(iface=self.interface, prn=self.process_packet, count=1, store=False)
-                time.sleep(0.5)
-            self.writer.close()
 
         threading.Thread(target=capture, daemon=True).start()
 
