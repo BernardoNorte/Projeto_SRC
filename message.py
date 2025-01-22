@@ -26,6 +26,8 @@ class PacketCaptureApp(ctk.CTk):
         self.frames = {}
         self.filter_text = ""
         self.packet_data = []
+        self.src_ip_count = {}
+        self.dst_ip_count = {}
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -37,11 +39,10 @@ class PacketCaptureApp(ctk.CTk):
         ctk.set_default_color_theme("dark-blue")
 
     def create_pos_selection(self):
-        #criar apenas a primera vez
+        # criar apenas a primera vez
         if "packet_table" not in self.frames or not self.frames["packet_table"]:
             self.frames["packet_table"] = self.create_packet_table_frame()
             self.frames["protocol_graph"] = self.create_protocol_graph_frame()
-
 
     def show_frame(self, frame_name):
         frame = self.frames[frame_name]
@@ -95,7 +96,7 @@ class PacketCaptureApp(ctk.CTk):
         button_frame.pack(pady=10)
 
         self.back_button = ctk.CTkButton(
-            button_frame, text="Back", command=self.return_to_interface_selection
+            button_frame, text="New Capture", command=self.return_to_interface_selection
         )
         self.back_button.pack(side="left", padx=5)
 
@@ -138,21 +139,39 @@ class PacketCaptureApp(ctk.CTk):
     def create_protocol_graph_frame(self):
         frame = ctk.CTkFrame(self)
 
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_rowconfigure(1, weight=1)
+        frame.grid_rowconfigure(2, weight=1)
+        frame.grid_rowconfigure(3, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_columnconfigure(1, weight=1)
+
         self.protocol_count = {}
         self.protocol_fig, self.protocol_ax = plt.subplots(figsize=(6, 4))
-        self.protocol_ax.set_title("Protocol Distribution")
+        self.protocol_ax.set_title("Protocol Distribution", color='white')
+        self.protocol_fig.patch.set_facecolor('gray')
+        self.protocol_ax.set_facecolor('gray')
 
-        self.graph_frame = ctk.CTkFrame(frame)
-        self.graph_frame.pack(pady=10)
-        self.canvas = FigureCanvasTkAgg(self.protocol_fig, master=self.graph_frame)
-        self.canvas.get_tk_widget().pack()
+        self.src_ip_fig, self.src_ip_ax = plt.subplots(figsize=(6, 4))
+        self.dst_ip_fig, self.dst_ip_ax = plt.subplots(figsize=(6, 4))
+
+        self.src_ip_canvas = FigureCanvasTkAgg(self.src_ip_fig, master=frame)
+        self.src_ip_canvas.get_tk_widget().grid(row=1, column=0, padx=10, pady=10)
+
+        self.dst_ip_canvas = FigureCanvasTkAgg(self.dst_ip_fig, master=frame)
+        self.dst_ip_canvas.get_tk_widget().grid(row=1, column=1, padx=10, pady=10)
+
+        self.canvas = FigureCanvasTkAgg(self.protocol_fig, master=frame)
+        self.canvas.get_tk_widget().grid(row=2, column=0, columnspan=2, pady=20)
 
         back_button = ctk.CTkButton(
             frame, text="Back", command=lambda: self.show_frame("packet_table")
         )
-        back_button.pack(pady=10)
+        back_button.grid(row=3, column=0, columnspan=2, pady=10)
 
         frame.bind("<Destroy>", lambda event: plt.close(self.protocol_fig))
+        frame.bind("<Destroy>", lambda event: plt.close(self.src_ip_fig))
+        frame.bind("<Destroy>", lambda event: plt.close(self.dst_ip_fig))
 
         return frame
 
@@ -330,21 +349,24 @@ class PacketCaptureApp(ctk.CTk):
             protocol = "LLDP"
             info = "Link Layer Discovery Protocol"
 
+        self.src_ip_count[src_ip] = self.src_ip_count.get(src_ip, 0) + 1
+        self.dst_ip_count[dst_ip] = self.dst_ip_count.get(dst_ip, 0) + 1
+
         self.rownum += 1
         packet_info = [self.rownum, src_ip, dst_ip, protocol, length, info, packet]
-
         self.packet_data.append(packet_info)
 
         if self.filter_text == "" or self.filter_matches(packet_info):
             self.after(0, self.add_packet_to_table, packet_info[:-1])
 
+        self.after(0, self.update_protocol_graph)
+        self.after(0, self.update_ip_graphs)
         self.update_protocol_data(protocol)
 
     def start_capture(self):
         self.create_pos_selection()
         self.interface = self.interface_var.get()
-        self.protocol_count = {}
-        self.update_protocol_graph()
+        self.clear_graphs()
 
         self.show_frame("packet_table")
         self.capturing = True
@@ -381,7 +403,7 @@ class PacketCaptureApp(ctk.CTk):
 
     def stop_capture(self):
         self.capturing = False
-        plt.close(self.protocol_fig)
+        self.close_graphs()
 
     def sort_table(self, col):
         col_name = self.table_headers[col]
@@ -408,19 +430,44 @@ class PacketCaptureApp(ctk.CTk):
 
     def update_protocol_graph(self):
         self.protocol_ax.clear()
+        self.protocol_ax.set_facecolor('gray')
         labels = list(self.protocol_count.keys())
         sizes = list(self.protocol_count.values())
+        self.protocol_ax.set_title("Protocol Percentage", color='white')
 
         self.protocol_ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+        self.protocol_ax.legend(labels, loc="upper right", bbox_to_anchor=(1.05, 1))
         self.protocol_ax.axis('equal')
         self.canvas.draw()
+
+    def update_ip_graphs(self):
+        top_src_ips = sorted(self.src_ip_count.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_dst_ips = sorted(self.dst_ip_count.items(), key=lambda x: x[1], reverse=True)[:3]
+
+        self.src_ip_ax.clear()
+        self.dst_ip_ax.clear()
+
+        src_ips, src_counts = zip(*top_src_ips)
+        self.src_ip_ax.set_title("Top 3 Source IPs", color='white')
+        self.src_ip_ax.bar(src_ips, src_counts, color='skyblue')
+
+        self.src_ip_ax.set_facecolor('gray')
+        self.src_ip_ax.tick_params(axis='x', labelsize=6)
+
+        dst_ips, dst_counts = zip(*top_dst_ips)
+        self.dst_ip_ax.bar(dst_ips, dst_counts, color='lightcoral')
+        self.dst_ip_ax.set_title("Top 3 Destination IPs", color='white')
+        self.dst_ip_ax.set_facecolor('gray')
+        self.dst_ip_ax.tick_params(axis='x', labelsize=6)
+
+        self.src_ip_canvas.draw()
+        self.dst_ip_canvas.draw()
 
     def update_protocol_data(self, protocol):
         if protocol in self.protocol_count:
             self.protocol_count[protocol] += 1
         else:
             self.protocol_count[protocol] = 1
-        self.update_protocol_graph()
 
     def interface_changed(self, value):
         print(f"Interface changed to: {value}")
@@ -445,8 +492,7 @@ class PacketCaptureApp(ctk.CTk):
 
             packets = rdpcap(file_path)
             self.clear_table()
-            self.protocol_count = {}
-            self.update_protocol_graph()
+            self.clear_graphs()
 
             def process():
                 for packet in packets:
@@ -457,13 +503,25 @@ class PacketCaptureApp(ctk.CTk):
             print(f"Successfully imported {len(packets)} packets from {file_path}.")
         except Exception as e:
             print(f"Failed to import PCAP file: {e}")
-        plt.close(self.protocol_fig)
+        self.close_graphs()
 
     def on_close(self):
         if "packet_table" in self.frames:
             if self.capturing:
                 self.stop_capture()
         self.destroy()
+
+    def close_graphs(self):
+        plt.close(self.protocol_fig)
+        plt.close(self.dst_ip_fig)
+        plt.close(self.src_ip_fig)
+
+    def clear_graphs(self):
+        self.protocol_count = {}
+        self.src_ip_count = {}
+        self.dst_ip_count = {}
+        self.update_protocol_graph()
+        #self.update_ip_graphs()
 
     def return_to_interface_selection(self):
         self.stop_capture()
